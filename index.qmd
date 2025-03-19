@@ -1,0 +1,88 @@
+---
+title: "Index"
+format: html
+execute: 
+  echo: FALSE
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(tidyverse)
+library(dplyr)
+library(primer.data)
+library(brms)
+library(tidybayes)
+library(gtsummary)
+library(ggthemes)
+library(tibble)
+library(scatterplot3d)
+library(plotly)
+```
+
+```{r}
+#| label: data
+
+CHES24<-read.csv("CHES_2024_final_v2.csv")
+
+CHES24<-CHES24|>mutate(populist=(people_v_elite*anti_elite_salience)/10)
+CHES24small<-CHES24|>select(country,party,family,vote,lrgen,regions,populist)
+
+CHES24id<-CHES24small|>mutate(family_id = case_when(family == "radrt" ~ 1,family == "con" ~ 2,family == "lib" ~ 3,family == "cd" ~ 4,family == "soc" ~ 5,family == "radleft" ~ 6,family == "green" ~ 7,family == "reg" ~ 8,family == "nofamily" ~ 9,family == "confessional" ~ 10,family == "agrarian/centre" ~ 11,
+                            TRUE ~ NA_real_))
+CHES24id
+set.seed(9)
+
+CHES24data <- CHES24small |> 
+  drop_na() 
+
+plot1<-ggplot(CHES24data,aes(x=regions,y=lrgen))+
+  geom_point()+ 
+  geom_smooth(aes(x=regions,y=lrgen), method="lm", se=F)
+#plot1
+
+#plot2<-persp(x=CHES24data$regions, y=CHES24data$lrgen, z=CHES24data$populist, theta = 30, phi = 30, expand = 0.5, col = "lightblue")
+#plot2
+
+colors<-c("brown", "blue", "yellow","steelblue", "pink", "red","green", "purple", "black","lightblue", "lightgreen")
+colors<-colors[as.numeric(CHES24id$family_id)]
+plot3<-scatterplot3d(x=CHES24id$populist,y=CHES24id$lrgen,z=CHES24id$regions, pch = 16, color=colors,grid=TRUE,box=TRUE)
+plot3
+```
+
+
+```{r}
+#| label: model
+#| cache: true
+
+fit_regional<-brm(formula = regions ~ lrgen, data = CHES24data, family = gaussian(link="identity"), refresh = 0, silent = 2, seed = 19)
+```
+
+```{r}
+#| label: plot
+#| message: false
+
+#posterior_interval(fit_nuclear)
+#fixef(fit_nuclear)
+#pp_check(fit_nuclear)
+
+#fit_nuclear |>
+#tbl_regression()
+
+ndata <- tibble(expand_grid(lrgen=0:10))
+
+combined_data <- fit_nuclear |>
+  add_epred_draws(newdata = ndata) |>
+  pivot_longer(cols = c(great, nuclear), names_to = "category", values_to = "value")
+
+full_plot <- ggplot(combined_data,aes(x = .epred, y = category, fill = as.factor(value))) +
+  stat_slab(alpha=0.8) +
+  scale_fill_calc() +
+  scale_x_continuous(labels=scales::percent_format()) +
+  scale_y_discrete(labels=c("Great","Nuclear")) +
+  labs(y="Category",x="Predicted Chance of High Escalation",fill="Involved Powers",title="Effects of Nuclear Proliferation on Peace",caption="Correlates of War Project",subtitle="The difference between nuclear and great power proliferation is negligible")
+
+full_plot
+```
+
+
