@@ -18,6 +18,8 @@ library(ggthemes)
 library(tibble)
 library(scatterplot3d)
 library(plotly)
+library(GGally)
+library(rgl)
 ```
 
 ```{r}
@@ -25,16 +27,22 @@ library(plotly)
 
 CHES24<-read.csv("CHES_2024_final_v2.csv")
 
-CHES24<-CHES24|>mutate(populist=(people_v_elite*anti_elite_salience)/10)
-CHES24small<-CHES24|>select(country,party,family,vote,lrgen,regions,populist)
+CHES24p<-CHES24|>mutate(populist=(people_v_elite*anti_elite_salience)/10)
 
-CHES24id<-CHES24small|>mutate(family_id = case_when(family == "radrt" ~ 1,family == "con" ~ 2,family == "lib" ~ 3,family == "cd" ~ 4,family == "soc" ~ 5,family == "radleft" ~ 6,family == "green" ~ 7,family == "reg" ~ 8,family == "nofamily" ~ 9,family == "confessional" ~ 10,family == "agrarian/centre" ~ 11,
+CHES24id<-CHES24p|>mutate(family_id = case_when(family == "radrt" ~ 1,family == "con" ~ 2,family == "lib" ~ 3,family == "cd" ~ 4,family == "soc" ~ 5,family == "radleft" ~ 6,family == "green" ~ 7,family == "reg" ~ 8,family == "nofamily" ~ 9,family == "confessional" ~ 10,family == "agrarian/centre" ~ 11,
                             TRUE ~ NA_real_))
 CHES24id
 set.seed(9)
 
-CHES24data <- CHES24small |> 
+CHES24small<-CHES24id|>select(country,party,family_id,vote,lrgen,regions,populist)
+
+CHES24data <- CHES24id |> 
   drop_na() 
+
+numdata<-CHES24small|>select(vote,lrgen,regions,populist,family_id)
+ggpairs(numdata)
+
+pairs(numdata,pch=18,col="steelblue")
 
 plot1<-ggplot(CHES24data,aes(x=regions,y=lrgen))+
   geom_point()+ 
@@ -47,7 +55,7 @@ plot1<-ggplot(CHES24data,aes(x=regions,y=lrgen))+
 colors<-c("brown", "blue", "yellow","steelblue", "pink", "red","green", "purple", "black","lightblue", "lightgreen")
 colors<-colors[as.numeric(CHES24id$family_id)]
 plot3<-scatterplot3d(x=CHES24id$populist,y=CHES24id$lrgen,z=CHES24id$regions, pch = 16, color=colors,grid=TRUE,box=TRUE)
-plot3
+#plot3
 ```
 
 
@@ -55,34 +63,98 @@ plot3
 #| label: model
 #| cache: true
 
-fit_regional<-brm(formula = regions ~ lrgen, data = CHES24data, family = gaussian(link="identity"), refresh = 0, silent = 2, seed = 19)
+model2 <- lm(regions ~ lrgen + populist, data = CHES24data)
+hist(residuals(model2), col = "steelblue")
+
+plot(fitted(model2), residuals(model2))
+
+abline(h = 0, lty = 2)
+summary(model2)
+
+
+open3d()
+
+plot3d(model2, plane.col='red')
+
+title3d("Multiple Linear Regression 3D Plot")
+
+play3d(spin3d(axis = c(0, 0, 0.5)), duration = 30)
 ```
+
 
 ```{r}
-#| label: plot
-#| message: false
+#| label: modelbayes
+#| cache: true
 
-#posterior_interval(fit_nuclear)
-#fixef(fit_nuclear)
-#pp_check(fit_nuclear)
+modelbrm <- brm(regions ~ lrgen + anti_elite_salience, data = CHES24data,family=gaussian())
+summary(modelbrm)
+posterior_interval(modelbrm)
+fixef(modelbrm)
+pp_check(modelbrm)
 
-#fit_nuclear |>
-#tbl_regression()
+modelbrms <- brm(regions ~ s(lrgen) + s(anti_elite_salience), data = CHES24data,family=gaussian())
+#modelbrmm <- brm(regions ~ lrgen*anti_elite_salience, data = CHES24data,family=gaussian())
 
-ndata <- tibble(expand_grid(lrgen=0:10))
+modelbrms2 <- brm(regions ~ s(lrgen,anti_elite_salience), data = CHES24data,family=gaussian())
+summary(modelbrms2)
+posterior_interval(modelbrms2)
+fixef(modelbrms2)
+pp_check(modelbrms2)
 
-combined_data <- fit_nuclear |>
-  add_epred_draws(newdata = ndata) |>
-  pivot_longer(cols = c(great, nuclear), names_to = "category", values_to = "value")
+plot(conditional_effects(modelbrms2, effects = "lrgen"))
+plot(conditional_effects(modelbrms2, effects = "anti_elite_salience"))
+#loo(modelbrm,modelbrms,modelbrms2,modelbrmm)
 
-full_plot <- ggplot(combined_data,aes(x = .epred, y = category, fill = as.factor(value))) +
+
+modelbrm |>
+  tbl_regression()
+
+ndata <- tibble(expand_grid(
+  lrgen=seq(0,10,by=0.1),
+  anti_elite_salience=seq(0,10,by=0.1)
+))
+
+cdata<-modelbrm|>
+  add_epred_draws(newdata=ndata)|>
+  group_by(lrgen, anti_elite_salience) |>
+  summarise(.epred = mean(.epred), .groups = "drop")
+
+cdatas<-modelbrms|>
+  add_epred_draws(newdata=ndata)|>
+  group_by(lrgen, anti_elite_salience) |>
+  summarise(.epred = mean(.epred), .groups = "drop")
+
+cdatas2<-modelbrms2|>
+  add_epred_draws(newdata=ndata)|>
+  group_by(lrgen, anti_elite_salience) |>
+  summarise(.epred = mean(.epred), .groups = "drop")
+
+
+full_plot <- ggplot(cdatas2,aes(x = .epred, y = anti_elite_salience, fill = lrgen)) +
   stat_slab(alpha=0.8) +
-  scale_fill_calc() +
-  scale_x_continuous(labels=scales::percent_format()) +
-  scale_y_discrete(labels=c("Great","Nuclear")) +
-  labs(y="Category",x="Predicted Chance of High Escalation",fill="Involved Powers",title="Effects of Nuclear Proliferation on Peace",caption="Correlates of War Project",subtitle="The difference between nuclear and great power proliferation is negligible")
+  scale_fill_viridis_c() +
+  scale_x_continuous(labels = scales::number_format(accuracy = 1)) +
+  scale_y_discrete(labels=c("lrgen","populist")) +
+  labs(y="values",x="level of regionalism",fill="Involved Powers",title="Effects of Nuclear Proliferation on Peace",caption="Correlates of War Project",subtitle="The difference between nuclear and great power proliferation is negligible")
 
 full_plot
+plot(conditional_effects(modelbrms2), points = TRUE)
+
+ggplot(cdata, aes(x = .epred, y = anti_elite_salience, fill = lrgen)) +
+  stat_slab(alpha = 0.8) +  # Shows the full distribution of predictions
+  scale_fill_viridis_c() +
+  scale_x_continuous(labels = scales::number_format(accuracy = 1)) +
+  labs(y = "Category", x = "Predicted Regions", 
+       title = "Predicted Values with Uncertainty",
+       fill = "Value of Predictor")
+
+ggplot(cdatas2, aes(x = lrgen, y = anti_elite_salience, fill = .epred)) +
+  geom_tile() +
+  geom_contour(aes(z = .epred), color = "black", alpha = 0.5) +  # Add contour lines
+  scale_fill_viridis_c() +
+  labs(x = "Left-Right General Position", y = "Populist Score", fill = "Predicted Regions")
+
 ```
+
 
 
